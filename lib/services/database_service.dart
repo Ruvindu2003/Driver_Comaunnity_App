@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../models/driver.dart';
 import '../models/bus.dart';
-import '../models/route.dart';
+import '../models/bus_route.dart';
 import '../models/schedule.dart';
 import '../models/location_data.dart';
 import '../models/sensor_data.dart';

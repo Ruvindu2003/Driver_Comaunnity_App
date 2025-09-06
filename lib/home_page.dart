@@ -10,6 +10,7 @@ import 'screens/drivers_screen.dart';
 import 'screens/buses_screen.dart';
 import 'screens/routes_screen.dart';
 import 'screens/schedules_screen.dart';
+import 'screens/tracking_screen.dart';
 import 'screens/reports_screen.dart';
 import 'screens/settings_screen.dart';
 
@@ -29,6 +30,7 @@ class _HomePageState extends State<HomePage> {
     const BusesScreen(),
     const RoutesScreen(),
     const SchedulesScreen(),
+    const TrackingScreen(),
     const ReportsScreen(),
     const SettingsScreen(),
   ];
@@ -70,6 +72,10 @@ class _HomePageState extends State<HomePage> {
           BottomNavigationBarItem(
             icon: Icon(Icons.schedule),
             label: 'Schedules',
+          ),
+          BottomNavigationBarItem(
+            icon: Icon(Icons.location_on),
+            label: 'Tracking',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.analytics),

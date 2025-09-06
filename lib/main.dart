@@ -5,6 +5,10 @@ import 'firebase_options.dart';
 import 'services/auth_service.dart';
 import 'services/driver_service.dart';
 import 'services/bus_service.dart';
+import 'services/location_service.dart';
+import 'services/sensor_service.dart';
+import 'services/notification_service.dart';
+import 'services/database_service.dart';
 import 'login_page.dart';
 import 'home_page.dart';
 
@@ -12,11 +16,18 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   print('Firebase initialized successfully!');
-  runApp(const MyApp());
+  
+  // Initialize notification service
+  final notificationService = NotificationService();
+  await notificationService.initialize();
+  
+  runApp(MyApp(notificationService: notificationService));
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  final NotificationService notificationService;
+  
+  const MyApp({super.key, required this.notificationService});
 
   @override
   Widget build(BuildContext context) {
@@ -25,6 +36,10 @@ class MyApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => AuthService()),
         ChangeNotifierProvider(create: (_) => DriverService()),
         ChangeNotifierProvider(create: (_) => BusService()),
+        ChangeNotifierProvider(create: (_) => LocationService()),
+        ChangeNotifierProvider(create: (_) => SensorService()),
+        ChangeNotifierProvider.value(value: notificationService),
+        Provider(create: (_) => DatabaseService()),
       ],
       child: MaterialApp(
         title: 'Driver Management',

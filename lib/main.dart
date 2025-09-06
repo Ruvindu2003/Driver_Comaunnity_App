@@ -3,6 +3,8 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:provider/provider.dart';
 import 'firebase_options.dart';
 import 'services/auth_service.dart';
+import 'services/driver_service.dart';
+import 'services/bus_service.dart';
 import 'login_page.dart';
 import 'home_page.dart';
 
@@ -21,6 +23,8 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) => DriverService()),
+        ChangeNotifierProvider(create: (_) => BusService()),
       ],
       child: MaterialApp(
         title: 'Driver Management',

@@ -18,6 +18,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   bool _isLoading = false;
   int _retryCount = 0;
   static const int _maxRetries = 3;
+  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+  bool _isSignUp = false;
 
   @override
   void initState() {
@@ -49,83 +52,99 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _animationController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
-  Future<void> _signInWithGoogle() async {
+  Future<void> _signInWithEmail() async {
+    if (_emailController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter both email and password'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     setState(() {
       _isLoading = true;
     });
 
     try {
       final authService = Provider.of<AuthService>(context, listen: false);
-      final userCredential = await authService.signInWithGoogle();
+      UserCredential? userCredential;
       
-      if (userCredential != null && mounted) {
-        // Reset retry count on successful sign-in
-        _retryCount = 0;
+      if (_isSignUp) {
+        userCredential = await authService.createUserWithEmailAndPassword(
+          _emailController.text.trim(),
+          _passwordController.text,
+        );
+      } else {
+        userCredential = await authService.signInWithEmailAndPassword(
+          _emailController.text.trim(),
+          _passwordController.text,
+        );
+      }
+      
+      // For mock authentication, always navigate to home page
+      if (mounted) {
         Navigator.of(context).pushReplacement(
           MaterialPageRoute(builder: (context) => const HomePage()),
         );
-      } else if (mounted) {
-        // User cancelled or popup was closed
-        _retryCount++;
-        if (_retryCount < _maxRetries) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Sign-in cancelled. Attempt ${_retryCount + 1} of $_maxRetries'),
-              backgroundColor: Colors.orange,
-              duration: const Duration(seconds: 2),
-              action: SnackBarAction(
-                label: 'Retry',
-                textColor: Colors.white,
-                onPressed: _signInWithGoogle,
-              ),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Multiple sign-in attempts failed. Please check your browser settings and try again.'),
-              backgroundColor: Colors.red,
-              duration: Duration(seconds: 4),
-            ),
-          );
-          _retryCount = 0; // Reset for next attempt
-        }
       }
     } catch (e) {
+      print('Sign-in error: $e');
       if (mounted) {
-        _retryCount++;
-        if (_retryCount < _maxRetries) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: ${e.toString()}. Attempt ${_retryCount + 1} of $_maxRetries'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 3),
-              action: SnackBarAction(
-                label: 'Retry',
-                textColor: Colors.white,
-                onPressed: _signInWithGoogle,
-              ),
-            ),
-          );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Multiple errors occurred. Please check your configuration: ${e.toString()}'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
-          );
-          _retryCount = 0; // Reset for next attempt
-        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sign-in failed: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
       }
     } finally {
       if (mounted) {
-      setState(() {
+        setState(() {
           _isLoading = false;
-      });
+        });
+      }
+    }
+  }
+
+  Future<void> _signInAsGuest() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final authService = Provider.of<AuthService>(context, listen: false);
+      final userCredential = await authService.signInAnonymously();
+      
+      // For mock authentication, always navigate to home page
+      if (mounted) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (context) => const HomePage()),
+        );
+      }
+    } catch (e) {
+      print('Guest sign-in error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Guest sign-in failed: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
       }
     }
   }
@@ -191,9 +210,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                       
                       const SizedBox(height: 8),
                       
-                      const Text(
-                        'Driver Management',
-                        style: TextStyle(
+                      Text(
+                        _isSignUp ? 'Create Account' : 'Driver Management',
+                        style: const TextStyle(
                           fontSize: 32,
                           color: Colors.white,
                           fontWeight: FontWeight.bold,
@@ -202,9 +221,11 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                       
                       const SizedBox(height: 16),
                       
-                      const Text(
-                        'Sign in to manage your bus routes and schedules',
-                        style: TextStyle(
+                      Text(
+                        _isSignUp 
+                            ? 'Create a new account to get started'
+                            : 'Sign in to manage your bus routes and schedules',
+                        style: const TextStyle(
                           fontSize: 16,
                           color: Colors.white70,
                           fontWeight: FontWeight.w400,
@@ -214,70 +235,149 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                       
                       const SizedBox(height: 60),
                       
-                      // Google Sign In Button
-                      Container(
-                        width: double.infinity,
-                        height: 56,
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(28),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
-                              blurRadius: 10,
-                              offset: const Offset(0, 5),
+                      // Email/Password Form
+                      Column(
+                        children: [
+                          // Email Field
+                          Container(
+                            width: double.infinity,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
                             ),
-                          ],
-                        ),
-                        child: Material(
-                          color: Colors.transparent,
-                          child: InkWell(
-                            borderRadius: BorderRadius.circular(28),
-                            onTap: _isLoading ? null : _signInWithGoogle,
-                            child: _isLoading
-                                ? const Center(
-                                    child: SizedBox(
-                                      width: 24,
-                                      height: 24,
-                                      child: CircularProgressIndicator(
-                                        strokeWidth: 2,
-                                        valueColor: AlwaysStoppedAnimation<Color>(
-                                          Color(0xFF667eea),
-                                        ),
-                                      ),
-                                    ),
-                                  )
-                                : Row(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-                                      // Google Icon
-                                      Container(
-                                        width: 24,
-                                        height: 24,
-                                        decoration: const BoxDecoration(
-                                          image: DecorationImage(
-                                            image: NetworkImage(
-                                              'https://developers.google.com/identity/images/g-logo.png',
+                            child: TextField(
+                              controller: _emailController,
+                              keyboardType: TextInputType.emailAddress,
+                              decoration: const InputDecoration(
+                                hintText: 'Enter your email',
+                                prefixIcon: Icon(Icons.email, color: Color(0xFF667eea)),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // Password Field
+                          Container(
+                            width: double.infinity,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: TextField(
+                              controller: _passwordController,
+                              obscureText: true,
+                              decoration: const InputDecoration(
+                                hintText: 'Enter your password',
+                                prefixIcon: Icon(Icons.lock, color: Color(0xFF667eea)),
+                                border: InputBorder.none,
+                                contentPadding: EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 30),
+                          
+                          // Sign In/Sign Up Button
+                          Container(
+                            width: double.infinity,
+                            height: 56,
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withOpacity(0.1),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 5),
+                                ),
+                              ],
+                            ),
+                            child: Material(
+                              color: Colors.transparent,
+                              child: InkWell(
+                                borderRadius: BorderRadius.circular(28),
+                                onTap: _isLoading ? null : _signInWithEmail,
+                                child: _isLoading
+                                    ? const Center(
+                                        child: SizedBox(
+                                          width: 24,
+                                          height: 24,
+                                          child: CircularProgressIndicator(
+                                            strokeWidth: 2,
+                                            valueColor: AlwaysStoppedAnimation<Color>(
+                                              Color(0xFF667eea),
                                             ),
-                                            fit: BoxFit.contain,
+                                          ),
+                                        ),
+                                      )
+                                    : Center(
+                                        child: Text(
+                                          _isSignUp ? 'Create Account' : 'Sign In',
+                                          style: const TextStyle(
+                                            fontSize: 16,
+                                            fontWeight: FontWeight.w600,
+                                            color: Color(0xFF333333),
                                           ),
                                         ),
                                       ),
-                                      
-                                      const SizedBox(width: 12),
-                                      
-                                      const Text(
-                                        'Continue with Google',
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.w600,
-                                          color: Color(0xFF333333),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                              ),
+                            ),
                           ),
-                        ),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // Toggle Sign In/Sign Up
+                          TextButton(
+                            onPressed: () {
+                              setState(() {
+                                _isSignUp = !_isSignUp;
+                              });
+                            },
+                            child: Text(
+                              _isSignUp 
+                                  ? 'Already have an account? Sign In'
+                                  : 'Don\'t have an account? Sign Up',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          
+                          const SizedBox(height: 20),
+                          
+                          // Continue as Guest Button
+                          TextButton(
+                            onPressed: _isLoading ? null : _signInAsGuest,
+                            child: const Text(
+                              'Continue as Guest',
+                              style: TextStyle(
+                                color: Colors.white70,
+                                fontSize: 16,
+                                decoration: TextDecoration.underline,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                       
                       const SizedBox(height: 40),

@@ -1,4 +1,11 @@
+import 'dart:async';
+
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:location/location.dart';
+import 'package:sensors_plus/sensors_plus.dart';
+
 
 void main() {
   runApp(const MyApp());
@@ -54,21 +61,78 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
+  final Location location = Location();
 
-  void _incrementCounter() {
-    setState(() {
-      // This call to setState tells the Flutter framework that something has
-      // changed in this State, which causes it to rerun the build method below
-      // so that the display can reflect the updated values. If we changed
-      // _counter without calling setState(), then the build method would not be
-      // called again, and so nothing would appear to happen.
-      _counter++;
-    });
+  LocationData? _location;
+  StreamSubscription<LocationData>? _locationSubscription;
+  String? _error;
+
+  Duration sensorInterval = const Duration(milliseconds: 20);
+
+  UserAccelerometerEvent? _userAccelerometerEvent;
+  DateTime? _userAccelerometerUpdateTime;
+  static const Duration _ignoreDuration = Duration(milliseconds: 20);
+  int? _userAccelerometerLastInterval;
+
+  Future<void> _listenAccelerometer() async {
+    userAccelerometerEventStream(samplingPeriod: sensorInterval).listen(
+      (UserAccelerometerEvent event) {
+        final now = event.timestamp;
+        setState(() {
+          _userAccelerometerEvent = event;
+          if (_userAccelerometerUpdateTime != null) {
+            final interval = now.difference(_userAccelerometerUpdateTime!);
+            if (interval > _ignoreDuration) {
+              _userAccelerometerLastInterval = interval.inMilliseconds;
+            }
+          }
+        });
+        _userAccelerometerUpdateTime = now;
+      },
+      onError: (e) {
+        showDialog(
+          context: context,
+          builder: (context) {
+            return const AlertDialog(
+              title: Text("Sensor Not Found"),
+              content: Text(
+                "It seems that your device doesn't support User Accelerometer Sensor",
+              ),
+            );
+          },
+        );
+      },
+      cancelOnError: true,
+    );
+  }
+
+  Future<void> _listenLocation() async {
+    _locationSubscription = location.onLocationChanged
+        .handleError((dynamic err) {
+          if (err is PlatformException) {
+            setState(() {
+              _error = err.code;
+            });
+          }
+          _locationSubscription?.cancel();
+          setState(() {
+            _locationSubscription = null;
+          });
+        })
+        .listen((currentLocation) {
+          setState(() {
+            _error = null;
+
+            _location = currentLocation;
+          });
+        });
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
+    _listenLocation();
+    _listenAccelerometer();
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
     //
@@ -104,19 +168,17 @@ class _MyHomePageState extends State<MyHomePage> {
           // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text('You have pushed the button this many times:'),
             Text(
-              '$_counter',
+              '${_location != null ? 'Location: ${_location!.latitude}, ${_location!.longitude}' : 'Error: $_error'}',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            Text(
+              '${_userAccelerometerEvent != null ? 'Accelerometer: ${_userAccelerometerEvent!.x}, ${_userAccelerometerEvent!.y}, ${_userAccelerometerEvent!.z}' : 'Error: $_error'}',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _incrementCounter,
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ), // This trailing comma makes auto-formatting nicer for build methods.
     );
   }
 }

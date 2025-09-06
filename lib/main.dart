@@ -1,11 +1,11 @@
 import 'dart:async';
 
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:location/location.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 
+enum TripPanalty { none, harshAcceleration, harshBraking, overspeed }
 
 void main() {
   runApp(const MyApp());
@@ -61,13 +61,18 @@ class MyHomePage extends StatefulWidget {
 }
 
 class _MyHomePageState extends State<MyHomePage> {
+  int? _counter = 0;
+
+  String? _speedKmh = "0.0";
+  String? _speedStatus = "Normal";
+
   final Location location = Location();
 
   LocationData? _location;
   StreamSubscription<LocationData>? _locationSubscription;
   String? _error;
 
-  Duration sensorInterval = const Duration(milliseconds: 20);
+  Duration sensorInterval = SensorInterval.normalInterval;
 
   UserAccelerometerEvent? _userAccelerometerEvent;
   DateTime? _userAccelerometerUpdateTime;
@@ -83,7 +88,21 @@ class _MyHomePageState extends State<MyHomePage> {
           if (_userAccelerometerUpdateTime != null) {
             final interval = now.difference(_userAccelerometerUpdateTime!);
             if (interval > _ignoreDuration) {
-              _userAccelerometerLastInterval = interval.inMilliseconds;
+              _userAccelerometerEvent = event;
+
+              // event.y measures forward/backward acceleration
+              if (event.y < -2.0) {
+                // A strong negative value indicates harsh braking
+                // handleHarshBraking();
+                _speedStatus = "Harsh Braking";
+                _reducePenalty(TripPanalty.harshBraking);
+              }
+              if (event.y > 1.0) {
+                // A strong positive value indicates harsh acceleration
+                //handleHarshAcceleration();
+                _speedStatus = "Harsh Acceleration";
+                _reducePenalty(TripPanalty.harshAcceleration);
+              }
             }
           }
         });
@@ -124,15 +143,70 @@ class _MyHomePageState extends State<MyHomePage> {
             _error = null;
 
             _location = currentLocation;
+
+            // currentLocation.speed is in meters per second (m/s)
+            final speedMps = currentLocation.speed ?? 0.0;
+            final speedKmh = speedMps * 3.6; // Convert to km/h
+
+            _speedKmh = speedKmh.toStringAsFixed(2);
+
+            // Now, check for overspeed events
+            const speedLimit = 80; // Example limit in km/h
+            if (speedKmh > speedLimit) {
+              // Trigger overspeed event and apply a penalty
+              // handleOverspeed();
+              _reducePenalty(TripPanalty.overspeed);
+            }
           });
         });
     setState(() {});
   }
 
-  @override
-  Widget build(BuildContext context) {
+  void _startTrip() {
     _listenLocation();
     _listenAccelerometer();
+    setState(() {
+      _counter = 100;
+    });
+  }
+
+  void _endTrip() {
+    _locationSubscription?.cancel();
+    setState(() {
+      _locationSubscription = null;
+      _counter = 0;
+    });
+  }
+
+  void _reducePenalty(TripPanalty penalty) {
+    int reductionAmount = 0;
+    switch (penalty) {
+      case TripPanalty.harshAcceleration:
+        reductionAmount = 2;
+        // Reduce harsh acceleration penalty
+        break;
+      case TripPanalty.harshBraking:
+        reductionAmount = 3;
+        // Reduce harsh braking penalty
+        break;
+      case TripPanalty.overspeed:
+        reductionAmount = 5;
+        // Reduce overspeed penalty
+        break;
+      case TripPanalty.none:
+        // No penalty to reduce
+        break;
+    }
+    setState(() {
+      _counter = (_counter ?? 0) - reductionAmount;
+      // if (_counter! < 0) _counter = 0;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // _listenLocation();
+    // _listenAccelerometer();
     // This method is rerun every time setState is called, for instance as done
     // by the _incrementCounter method above.
     //
@@ -169,13 +243,24 @@ class _MyHomePageState extends State<MyHomePage> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
             Text(
-              '${_location != null ? 'Location: ${_location!.latitude}, ${_location!.longitude}' : 'Error: $_error'}',
+              '${_speedKmh != null ? 'Speed: ${_speedKmh} km/h' : 'Error: $_error'}',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
             Text(
-              '${_userAccelerometerEvent != null ? 'Accelerometer: ${_userAccelerometerEvent!.x}, ${_userAccelerometerEvent!.y}, ${_userAccelerometerEvent!.z}' : 'Error: $_error'}',
+              '${_speedStatus != null ? 'Status: ${_speedStatus}' : 'Error: $_error'}',
               style: Theme.of(context).textTheme.headlineMedium,
             ),
+            Text(
+              '${_userAccelerometerEvent != null ? 'Accelerometer Y: ${_userAccelerometerEvent!.y}' : 'Error: $_error'}',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            FilledButton(onPressed: _startTrip, child: Text('Start Trip')),
+            SizedBox(height: 16),
+            Text(
+              'Driver Score: ${_counter ?? 0}',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+            FilledButton(onPressed: _endTrip, child: Text('End Trip')),
           ],
         ),
       ),

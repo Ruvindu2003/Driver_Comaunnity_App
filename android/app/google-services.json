@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "345739627083",
+    "project_id": "vehical-mnagement-system",
+    "storage_bucket": "vehical-mnagement-system.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "YOUR_ANDROID_APP_ID",
+        "android_client_info": {
+          "package_name": "com.example.driver_management"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "YOUR_GOOGLE_CLIENT_ID",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.driver_management",
+            "certificate_hash": "YOUR_SHA1_FINGERPRINT"
+          }
+        },
+        {
+          "client_id": "YOUR_WEB_CLIENT_ID",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDiixc9TbrrFg75yOlg5z9pScOGkzZuUU8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "YOUR_WEB_CLIENT_ID",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

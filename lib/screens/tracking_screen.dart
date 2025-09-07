@@ -23,8 +23,8 @@ class TrackingScreen extends StatefulWidget {
 class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStateMixin {
   late TabController _tabController;
   GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
-  Set<Polyline> _polylines = {};
+  final Set<Marker> _markers = {};
+  final Set<Polyline> _polylines = {};
   Bus? _selectedBus;
   bool _isTracking = false;
 
@@ -206,8 +206,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                 debugPrint('Test QR button pressed');
                 _showSimpleQRDialog(context);
               },
-              child: const Icon(Icons.qr_code),
               backgroundColor: Colors.green,
+              child: const Icon(Icons.qr_code),
             ),
             const SizedBox(height: 16),
             FloatingActionButton(

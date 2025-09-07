@@ -8,12 +8,15 @@ plugins {
 
 android {
     namespace = "com.example.driver_management"
-    compileSdk = 35
+    compileSdk = 34
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
+    // Use a specific NDK version that exists
+    ndkVersion = "25.1.8937393"
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
@@ -25,9 +28,10 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = 21
-        targetSdk = 35
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        
     }
 
     buildTypes {

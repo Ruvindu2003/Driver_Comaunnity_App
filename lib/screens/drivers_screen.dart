@@ -395,8 +395,8 @@ class _AddDriverDialogState extends State<AddDriverDialog> {
   final _addressController = TextEditingController();
   final _emergencyContactController = TextEditingController();
   final _emergencyPhoneController = TextEditingController();
-  DateTime _dateOfBirth = DateTime(1990);
-  DateTime _licenseExpiry = DateTime.now().add(const Duration(days: 365));
+  final DateTime _dateOfBirth = DateTime(1990);
+  final DateTime _licenseExpiry = DateTime.now().add(const Duration(days: 365));
   String _gender = 'Male';
   String _bloodGroup = 'O+';
 

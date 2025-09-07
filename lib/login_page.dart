@@ -16,7 +16,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
   bool _isLoading = false;
-  int _retryCount = 0;
+  final int _retryCount = 0;
   static const int _maxRetries = 3;
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();

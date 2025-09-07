@@ -494,8 +494,8 @@ class _AddBusDialogState extends State<AddBusDialog> {
   final _mileageController = TextEditingController();
   int _year = 2020;
   String _fuelType = 'Diesel';
-  DateTime _lastServiceDate = DateTime.now().subtract(const Duration(days: 30));
-  DateTime _nextServiceDate = DateTime.now().add(const Duration(days: 30));
+  final DateTime _lastServiceDate = DateTime.now().subtract(const Duration(days: 30));
+  final DateTime _nextServiceDate = DateTime.now().add(const Duration(days: 30));
 
   @override
   Widget build(BuildContext context) {

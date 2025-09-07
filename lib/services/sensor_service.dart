@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import '../models/sensor_data.dart';
 
 class SensorService extends ChangeNotifier {

@@ -15,8 +15,14 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    // Use a specific NDK version that exists
-    ndkVersion = "25.1.8937393"
+    // Disable NDK completely
+    packagingOptions {
+        jniLibs {
+            useLegacyPackaging = false
+        }
+    }
+
+
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()

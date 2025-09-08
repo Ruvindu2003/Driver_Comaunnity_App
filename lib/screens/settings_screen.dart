@@ -1,7 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import '../services/auth_service.dart';
-import '../login_page.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -100,11 +97,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
           const Divider(),
           _buildSettingItem(
-            'Sign Out',
-            'Sign out of your account',
-            Icons.logout,
-            () => _showSignOutDialog(),
-            isDestructive: true,
+            'App Info',
+            'Version 1.0.0 - Bus Management System',
+            Icons.info,
+            () => _showAppInfoDialog(),
           ),
         ],
       ),
@@ -150,48 +146,34 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showSignOutDialog() {
+  void _showAppInfoDialog() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Sign Out'),
-        content: const Text('Are you sure you want to sign out?'),
+        title: const Text('App Information'),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Bus Management System'),
+            SizedBox(height: 8),
+            Text('Version: 1.0.0'),
+            SizedBox(height: 8),
+            Text('Features:'),
+            Text('• Automatic Speed Control'),
+            Text('• Real-time Tracking'),
+            Text('• Sensor Monitoring'),
+            Text('• Weather Integration'),
+            Text('• Driver Management'),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _signOut();
-            },
-            child: const Text('Sign Out'),
+            child: const Text('Close'),
           ),
         ],
       ),
     );
-  }
-
-  void _signOut() async {
-    try {
-      final authService = Provider.of<AuthService>(context, listen: false);
-      await authService.signOut();
-      
-      if (context.mounted) {
-        Navigator.of(context).pushReplacement(
-          MaterialPageRoute(builder: (context) => const LoginPage()),
-        );
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error signing out: ${e.toString()}'),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-    }
   }
 }

@@ -1,5 +1,8 @@
+
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:fl_chart/fl_chart.dart';
 import '../services/family_vehicle_service.dart';
 
 class ReportsScreen extends StatefulWidget {
@@ -28,6 +31,36 @@ class _ReportsScreenState extends State<ReportsScreen> {
         backgroundColor: const Color(0xFF667eea),
         foregroundColor: Colors.white,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: () {
+              setState(() {
+                // Trigger rebuild to refresh data
+              });
+            },
+            tooltip: 'Refresh Data',
+          ),
+          PopupMenuButton<String>(
+            onSelected: (value) {
+              if (value == 'export') {
+                _showExportOptions(context);
+              }
+            },
+            itemBuilder: (BuildContext context) => [
+              const PopupMenuItem<String>(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(Icons.download, color: Colors.grey),
+                    SizedBox(width: 8),
+                    Text('Export Report'),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
       ),
       body: Consumer<FamilyVehicleService>(
         builder: (context, vehicleService, child) {
@@ -40,6 +73,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildOverviewCards(stats),
+                const SizedBox(height: 24),
+                _buildInteractiveCharts(vehicles),
                 const SizedBox(height: 24),
                 _buildVehiclePerformanceChart(vehicles),
                 const SizedBox(height: 24),
@@ -141,6 +176,230 @@ class _ReportsScreenState extends State<ReportsScreen> {
         ],
       ),
     );
+  }
+
+  Widget _buildInteractiveCharts(List<dynamic> vehicles) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Performance Analytics',
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: Color(0xFF2D3748),
+            ),
+          ),
+          const SizedBox(height: 20),
+          SizedBox(
+            height: 200,
+            child: Row(
+              children: [
+                Expanded(
+                  child: _buildPieChart(vehicles),
+                ),
+                const SizedBox(width: 20),
+                Expanded(
+                  child: _buildBarChart(vehicles),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPieChart(List<dynamic> vehicles) {
+    if (vehicles.isEmpty) {
+      return const Center(
+        child: Text('No data available'),
+      );
+    }
+
+    final totalDistance = vehicles.fold(0.0, (sum, v) => sum + v.totalDistance);
+    final pieData = vehicles.map((vehicle) {
+      final percentage = totalDistance > 0 ? (vehicle.totalDistance / totalDistance) * 100 : 0;
+      return PieChartSectionData(
+        color: _getVehicleColor(vehicle.name),
+        value: percentage,
+        title: '${percentage.toStringAsFixed(1)}%',
+        radius: 60,
+        titleStyle: const TextStyle(
+          fontSize: 12,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
+        ),
+      );
+    }).toList();
+
+    return Column(
+      children: [
+        const Text(
+          'Distance Distribution',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF2D3748),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: PieChart(
+            PieChartData(
+              sections: pieData,
+              centerSpaceRadius: 30,
+              sectionsSpace: 2,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 10,
+          children: vehicles.map((vehicle) {
+            return Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 12,
+                  height: 12,
+                  decoration: BoxDecoration(
+                    color: _getVehicleColor(vehicle.name),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  vehicle.name,
+                  style: const TextStyle(fontSize: 10),
+                ),
+              ],
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBarChart(List<dynamic> vehicles) {
+    if (vehicles.isEmpty) {
+      return const Center(
+        child: Text('No data available'),
+      );
+    }
+
+    final maxEfficiency = vehicles.map((v) => v.averageFuelConsumption).reduce((a, b) => a > b ? a : b);
+    
+    return Column(
+      children: [
+        const Text(
+          'Fuel Efficiency',
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.w500,
+            color: Color(0xFF2D3748),
+          ),
+        ),
+        const SizedBox(height: 10),
+        Expanded(
+          child: BarChart(
+            BarChartData(
+              alignment: BarChartAlignment.spaceAround,
+              maxY: maxEfficiency * 1.2,
+              barTouchData: BarTouchData(
+                enabled: true,
+                touchTooltipData: BarTouchTooltipData(
+                  tooltipBgColor: Colors.blueGrey.withOpacity(0.8),
+                  getTooltipItem: (group, groupIndex, rod, rodIndex) {
+                    return BarTooltipItem(
+                      '${vehicles[group.x].name}\n${rod.toY.toStringAsFixed(1)} L/100km',
+                      const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
+                ),
+              ),
+              titlesData: FlTitlesData(
+                show: true,
+                rightTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                topTitles: const AxisTitles(sideTitles: SideTitles(showTitles: false)),
+                bottomTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) {
+                      if (value.toInt() < vehicles.length) {
+                        return Text(
+                          vehicles[value.toInt()].name.substring(0, 3),
+                          style: const TextStyle(fontSize: 10),
+                        );
+                      }
+                      return const Text('');
+                    },
+                  ),
+                ),
+                leftTitles: AxisTitles(
+                  sideTitles: SideTitles(
+                    showTitles: true,
+                    getTitlesWidget: (value, meta) {
+                      return Text(
+                        value.toInt().toString(),
+                        style: const TextStyle(fontSize: 10),
+                      );
+                    },
+                  ),
+                ),
+              ),
+              borderData: FlBorderData(show: false),
+              barGroups: vehicles.asMap().entries.map((entry) {
+                final index = entry.key;
+                final vehicle = entry.value;
+                return BarChartGroupData(
+                  x: index,
+                  barRods: [
+                    BarChartRodData(
+                      toY: vehicle.averageFuelConsumption,
+                      color: _getVehicleColor(vehicle.name),
+                      width: 20,
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+                    ),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Color _getVehicleColor(String vehicleName) {
+    final colors = [
+      Colors.blue,
+      Colors.green,
+      Colors.orange,
+      Colors.purple,
+      Colors.red,
+      Colors.teal,
+      Colors.indigo,
+      Colors.pink,
+    ];
+    final index = vehicleName.hashCode % colors.length;
+    return colors[index];
   }
 
   Widget _buildVehiclePerformanceChart(List<dynamic> vehicles) {
@@ -431,6 +690,84 @@ class _ReportsScreenState extends State<ReportsScreen> {
           ),
         ),
       ],
+    );
+  }
+
+  void _showExportOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      builder: (BuildContext context) {
+        return Container(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                'Export Report',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                title: const Text('Export as PDF'),
+                subtitle: const Text('Generate a PDF report with charts and data'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _exportAsPDF(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.table_chart, color: Colors.green),
+                title: const Text('Export as Excel'),
+                subtitle: const Text('Generate an Excel spreadsheet with data'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _exportAsExcel(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.image, color: Colors.blue),
+                title: const Text('Export Charts as Images'),
+                subtitle: const Text('Save charts as PNG images'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _exportChartsAsImages(context);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _exportAsPDF(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('PDF export feature coming soon!'),
+        backgroundColor: Colors.blue,
+      ),
+    );
+  }
+
+  void _exportAsExcel(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Excel export feature coming soon!'),
+        backgroundColor: Colors.green,
+      ),
+    );
+  }
+
+  void _exportChartsAsImages(BuildContext context) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Image export feature coming soon!'),
+        backgroundColor: Colors.blue,
+      ),
     );
   }
 }

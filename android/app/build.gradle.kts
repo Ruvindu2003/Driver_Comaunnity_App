@@ -13,14 +13,11 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
     }
 
-    // Disable NDK completely
-    packagingOptions {
-        jniLibs {
-            useLegacyPackaging = false
-        }
-    }
+    // Configure NDK for native code compilation
+    ndkVersion = "23.1.7779620"
 
 
 
@@ -38,6 +35,8 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
+        // Force all dependencies to use the same compile SDK
+        multiDexEnabled = true
     }
 
     buildTypes {
@@ -51,4 +50,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 }

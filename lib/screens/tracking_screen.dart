@@ -6,12 +6,11 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../services/location_service.dart';
 import '../services/sensor_service.dart';
-import '../services/bus_service.dart';
-import '../models/bus.dart';
+import '../services/family_vehicle_service.dart';
+import '../models/family_vehicle.dart';
 import '../models/location_data.dart';
 import '../models/sensor_data.dart';
 import '../widgets/error_boundary.dart';
-import '../utils/qr_connection_helper.dart';
 
 class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key});
@@ -25,7 +24,7 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   GoogleMapController? _mapController;
   final Set<Marker> _markers = {};
   final Set<Polyline> _polylines = {};
-  Bus? _selectedBus;
+  FamilyVehicle? _selectedVehicle;
   bool _isTracking = false;
 
   @override
@@ -84,21 +83,20 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
             ),
           );
 
-          // Add bus location marker if tracking
-          if (_selectedBus != null && _isTracking) {
-            if (_selectedBus!.currentLatitude.isFinite && _selectedBus!.currentLongitude.isFinite) {
-              _markers.add(
-                Marker(
-                  markerId: MarkerId('bus_${_selectedBus!.id}'),
-                  position: LatLng(_selectedBus!.currentLatitude, _selectedBus!.currentLongitude),
-                  infoWindow: InfoWindow(
-                    title: 'Bus ${_selectedBus!.busNumber}',
-                    snippet: 'Status: ${_selectedBus!.status}',
-                  ),
-                  icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+          // Add vehicle location marker if tracking
+          if (_selectedVehicle != null && _isTracking) {
+            // For family vehicles, we'll use the current location as vehicle location
+            _markers.add(
+              Marker(
+                markerId: MarkerId('vehicle_${_selectedVehicle!.id}'),
+                position: LatLng(location.latitude, location.longitude),
+                infoWindow: InfoWindow(
+                  title: '${_selectedVehicle!.name}',
+                  snippet: 'Status: ${_selectedVehicle!.status}',
                 ),
-              );
-            }
+                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+              ),
+            );
           }
 
           // Update polylines with location history
@@ -176,14 +174,6 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.qr_code),
-              onPressed: () {
-                debugPrint('QR Code button pressed');
-                _showSimpleQRDialog(context);
-              },
-              tooltip: 'Connect to Phone',
-            ),
-            IconButton(
               icon: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
               onPressed: _toggleTracking,
             ),
@@ -201,25 +191,15 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
             FloatingActionButton(
-              heroTag: "test_qr",
-              onPressed: () {
-                debugPrint('Test QR button pressed');
-                _showSimpleQRDialog(context);
-              },
-              backgroundColor: Colors.green,
-              child: const Icon(Icons.qr_code),
-            ),
-            const SizedBox(height: 16),
-            FloatingActionButton(
               heroTag: "center_location_tracking",
               onPressed: _centerMapOnCurrentLocation,
               child: const Icon(Icons.my_location),
             ),
             const SizedBox(height: 16),
             FloatingActionButton(
-              heroTag: "select_bus_tracking",
-              onPressed: _showBusSelector,
-              child: const Icon(Icons.bus_alert),
+              heroTag: "select_vehicle_tracking",
+              onPressed: _showVehicleSelector,
+              child: const Icon(Icons.directions_car),
             ),
           ],
         ),
@@ -228,8 +208,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   }
 
   Widget _buildMapView() {
-    return Consumer2<LocationService, BusService>(
-      builder: (context, locationService, busService, child) {
+    return Consumer2<LocationService, FamilyVehicleService>(
+      builder: (context, locationService, vehicleService, child) {
         return Stack(
           children: [
             // Custom map view instead of Google Maps
@@ -266,10 +246,10 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
                     const SizedBox(height: 20),
                     ElevatedButton.icon(
                       onPressed: () {
-                        _showSimpleQRDialog(context);
+                        _centerMapOnCurrentLocation();
                       },
-                      icon: const Icon(Icons.qr_code),
-                      label: const Text('Connect to Phone'),
+                      icon: const Icon(Icons.my_location),
+                      label: const Text('Center Location'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.blue,
                         foregroundColor: Colors.white,
@@ -728,8 +708,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   }
 
   void _toggleTracking() {
-    if (_selectedBus == null) {
-      _showBusSelector();
+    if (_selectedVehicle == null) {
+      _showVehicleSelector();
       return;
     }
 
@@ -738,8 +718,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
     });
 
     if (_isTracking) {
-      context.read<LocationService>().startTracking(_selectedBus!.id);
-      context.read<SensorService>().startMonitoring(_selectedBus!.id);
+      context.read<LocationService>().startTracking(_selectedVehicle!.id);
+      context.read<SensorService>().startMonitoring(_selectedVehicle!.id);
       
       // Update map with tracking data
       _updateMapWithCurrentLocation();
@@ -755,8 +735,8 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
       context.read<LocationService>().stopTracking();
       context.read<SensorService>().stopMonitoring();
       
-      // Clear bus markers when stopping
-      _markers.removeWhere((marker) => marker.markerId.value.startsWith('bus_'));
+      // Clear vehicle markers when stopping
+      _markers.removeWhere((marker) => marker.markerId.value.startsWith('vehicle_'));
       setState(() {});
       
       // Show success message
@@ -770,30 +750,30 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
   }
 
   void _centerMapOnCurrentLocation() {
-    // Map is disabled, show QR dialog instead
-    _showSimpleQRDialog(context);
+    // Center map on current location
+    _updateMapWithCurrentLocation();
   }
 
-  void _showBusSelector() {
+  void _showVehicleSelector() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Select Bus'),
-        content: Consumer<BusService>(
-          builder: (context, busService, child) {
+        title: const Text('Select Vehicle'),
+        content: Consumer<FamilyVehicleService>(
+          builder: (context, vehicleService, child) {
             return SizedBox(
               width: double.maxFinite,
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: busService.buses.length,
+                itemCount: vehicleService.vehicles.length,
                 itemBuilder: (context, index) {
-                  final bus = busService.buses[index];
+                  final vehicle = vehicleService.vehicles[index];
                   return ListTile(
-                    title: Text(bus.busNumber),
-                    subtitle: Text('${bus.model} - ${bus.status}'),
+                    title: Text(vehicle.name),
+                    subtitle: Text('${vehicle.fullName} - ${vehicle.status}'),
                     onTap: () {
                       setState(() {
-                        _selectedBus = bus;
+                        _selectedVehicle = vehicle;
                       });
                       Navigator.pop(context);
                       _updateMapWithCurrentLocation();
@@ -1090,152 +1070,6 @@ class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStat
     );
   }
 
-  void _showSimpleQRDialog(BuildContext context) {
-    debugPrint('QR dialog method called');
-    showDialog(
-      context: context,
-      builder: (context) {
-        debugPrint('QR dialog builder called');
-        return AlertDialog(
-          title: Row(
-            children: [
-              const Icon(Icons.qr_code, color: Colors.blue),
-              const SizedBox(width: 8),
-              const Text('Connect to Phone'),
-            ],
-          ),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'To connect your phone to this Flutter app:',
-                  style: TextStyle(fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 16),
-                _buildStep('1', 'Enable Developer Options on your phone'),
-                _buildStep('2', 'Enable USB Debugging in Developer Options'),
-                _buildStep('3', 'Connect phone to same WiFi network as this computer'),
-                _buildStep('4', 'Open Command Prompt and run: adb tcpip 5555'),
-                _buildStep('5', 'Run: adb connect 10.31.4.97:5555'),
-                _buildStep('6', 'Run: flutter run'),
-                const SizedBox(height: 20),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.blue[50],
-                    border: Border.all(color: Colors.blue[200]!),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Column(
-                    children: [
-                      const Icon(Icons.qr_code, size: 120, color: Colors.blue),
-                      const SizedBox(height: 12),
-                      const Text(
-                        'Connection String:',
-                        style: TextStyle(fontWeight: FontWeight.bold),
-                      ),
-                      const SizedBox(height: 8),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: Colors.white,
-                          border: Border.all(color: Colors.grey[300]!),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Text(
-                          '10.31.4.97:5555',
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'Copy this string and use it with adb connect',
-                        style: TextStyle(fontSize: 12, color: Colors.grey),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 4),
-                      const Text(
-                        'NOTE: This is NOT a web URL! Use with ADB command.',
-                        style: TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.bold),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                debugPrint('QR dialog closed');
-                Navigator.pop(context);
-              },
-              child: const Text('Close'),
-            ),
-            ElevatedButton.icon(
-              onPressed: () {
-                debugPrint('Copy button pressed');
-                Clipboard.setData(const ClipboardData(text: '10.31.4.97:5555'));
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Connection string copied to clipboard!'),
-                    backgroundColor: Colors.green,
-                    duration: Duration(seconds: 2),
-                  ),
-                );
-              },
-              icon: const Icon(Icons.copy),
-              label: const Text('Copy'),
-            ),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildStep(String number, String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 24,
-            height: 24,
-            decoration: BoxDecoration(
-              color: Colors.blue,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Center(
-              child: Text(
-                number,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(fontSize: 14),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _BackgroundPatternPainter extends CustomPainter {

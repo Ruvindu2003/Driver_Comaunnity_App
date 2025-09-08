@@ -17,8 +17,7 @@ android {
     }
 
     // Configure NDK for native code compilation
-    ndkVersion = "23.1.7779620"
-
+    ndkVersion = "26.3.11579264"
 
 
     kotlinOptions {

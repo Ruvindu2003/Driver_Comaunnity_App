@@ -8,7 +8,7 @@ import '../models/location_data.dart';
 import '../models/sensor_data.dart';
 
 class DatabaseService {
-  static const String _baseUrl = 'http://localhost:3000/api'; // Your MySQL API endpoint
+  static const String _baseUrl = 'http://localhost:3060/api'; // Your MySQL API endpoint
   static const Map<String, String> _headers = {
     'Content-Type': 'application/json',
   };

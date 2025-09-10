@@ -1,16 +1,9 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'dart:math' as math;
-import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:fl_chart/fl_chart.dart';
+import 'package:geolocator/geolocator.dart';
 import '../services/location_service.dart';
 import '../services/sensor_service.dart';
-import '../services/family_vehicle_service.dart';
-import '../models/family_vehicle.dart';
-import '../models/location_data.dart';
-import '../models/sensor_data.dart';
-import '../widgets/error_boundary.dart';
 
 class TrackingScreen extends StatefulWidget {
   const TrackingScreen({super.key});
@@ -19,1094 +12,1083 @@ class TrackingScreen extends StatefulWidget {
   State<TrackingScreen> createState() => _TrackingScreenState();
 }
 
-class _TrackingScreenState extends State<TrackingScreen> with TickerProviderStateMixin {
-  late TabController _tabController;
-  GoogleMapController? _mapController;
-  final Set<Marker> _markers = {};
-  final Set<Polyline> _polylines = {};
-  FamilyVehicle? _selectedVehicle;
+class _TrackingScreenState extends State<TrackingScreen> with WidgetsBindingObserver {
+  List<Map<String, double>> _trackingPoints = []; // Store lat/lng as simple map
   bool _isTracking = false;
+  bool _hasPermission = false;
+  bool _isRequestingPermission = false;
+  Timer? _locationCheckTimer;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    WidgetsBinding.instance.addObserver(this);
     _initializeLocation();
-    debugPrint('TrackingScreen initialized - QR code should be available');
+    _startLocationCheckTimer();
+    _setupLocationListener();
   }
 
-  Future<void> _initializeLocation() async {
-    // Request location permission
+  void _setupLocationListener() {
+    // Listen to location service changes
     final locationService = context.read<LocationService>();
-    bool hasPermission = await locationService.requestPermission();
-    
-    if (hasPermission) {
-      // Try to get current position
-      await locationService.getCurrentPosition('default');
-      _updateMapWithCurrentLocation();
-    } else {
-      // Show helpful message about location permission
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(locationService.error ?? 'Location permission required'),
-            backgroundColor: Colors.orange,
-            action: SnackBarAction(
-              label: 'Retry',
-              onPressed: () => _initializeLocation(),
-            ),
-          ),
-        );
-      }
-    }
-  }
-
-  void _updateMapWithCurrentLocation() {
-    try {
-      final locationService = context.read<LocationService>();
-      if (locationService.currentLocation != null && _mapController != null) {
+    locationService.addListener(() {
+      if (mounted && _isTracking && locationService.currentLocation != null) {
         final location = locationService.currentLocation!;
-        
-        // Validate coordinates
-        if (location.latitude.isFinite && location.longitude.isFinite) {
-          // Add current location marker
-          _markers.clear();
-          _markers.add(
-            Marker(
-              markerId: const MarkerId('current_location'),
-              position: LatLng(location.latitude, location.longitude),
-              infoWindow: const InfoWindow(
-                title: 'Current Location',
-                snippet: 'You are here',
-              ),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
-            ),
-          );
-
-          // Add vehicle location marker if tracking
-          if (_selectedVehicle != null && _isTracking) {
-            // For family vehicles, we'll use the current location as vehicle location
-            _markers.add(
-              Marker(
-                markerId: MarkerId('vehicle_${_selectedVehicle!.id}'),
-                position: LatLng(location.latitude, location.longitude),
-                infoWindow: InfoWindow(
-                  title: '${_selectedVehicle!.name}',
-                  snippet: 'Status: ${_selectedVehicle!.status}',
-                ),
-                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-              ),
-            );
-          }
-
-          // Update polylines with location history
-          _updatePolylines();
-
-          // Move camera to current location
-          _mapController!.animateCamera(
-            CameraUpdate.newLatLngZoom(
-              LatLng(location.latitude, location.longitude),
-              15.0,
-            ),
-          );
-
-          setState(() {});
-        }
+        // Add new tracking point
+        _trackingPoints.add({
+          'latitude': location.latitude,
+          'longitude': location.longitude,
+        });
+        setState(() {});
       }
-    } catch (e) {
-      debugPrint('Error updating map with current location: $e');
-    }
-  }
-
-  void _updatePolylines() {
-    try {
-      final locationService = context.read<LocationService>();
-      if (locationService.locationHistory.length > 1) {
-        final points = locationService.locationHistory
-            .where((location) => 
-                location.latitude.isFinite && 
-                location.longitude.isFinite)
-            .map((location) => LatLng(location.latitude, location.longitude))
-            .toList();
-
-        if (points.length > 1) {
-          _polylines.clear();
-          _polylines.add(
-            Polyline(
-              polylineId: const PolylineId('route'),
-              points: points,
-              color: Colors.blue,
-              width: 4,
-              patterns: [PatternItem.dash(20), PatternItem.gap(10)],
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      debugPrint('Error updating polylines: $e');
-    }
+    });
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    WidgetsBinding.instance.removeObserver(this);
+    _locationCheckTimer?.cancel();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    return ErrorBoundary(
-      child: Scaffold(
-        appBar: AppBar(
-          title: const Text('Real-Time Tracking'),
-          backgroundColor: const Color(0xFF667eea),
-          foregroundColor: Colors.white,
-          bottom: TabBar(
-            controller: _tabController,
-            indicatorColor: Colors.white,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white70,
-            tabs: const [
-              Tab(icon: Icon(Icons.map), text: 'Map View'),
-              Tab(icon: Icon(Icons.speed), text: 'Sensors'),
-              Tab(icon: Icon(Icons.analytics), text: 'Analytics'),
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (!mounted) return;
+    
+    try {
+      final locationService = context.read<LocationService>();
+      
+      if (state == AppLifecycleState.resumed) {
+        // App came back to foreground, check location status
+        _checkLocationStatus();
+        // Switch to foreground tracking if we were tracking
+        if (_isTracking) {
+          locationService.handleAppLifecycleChange('default', true);
+        }
+      } else if (state == AppLifecycleState.paused) {
+        // App went to background, switch to background tracking if we were tracking
+        if (_isTracking) {
+          locationService.handleAppLifecycleChange('default', false);
+        }
+      }
+    } catch (e) {
+      // Handle any errors silently to prevent crashes
+      print('Error in app lifecycle change: $e');
+    }
+  }
+
+  void _startLocationCheckTimer() {
+    _locationCheckTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) {
+        _checkLocationStatus();
+      }
+    });
+  }
+
+  Future<void> _checkLocationStatus() async {
+    if (!mounted) return;
+    
+    try {
+      final locationService = context.read<LocationService>();
+      bool serviceEnabled = await locationService.isLocationServiceEnabled;
+      bool hasPermission = await locationService.hasPermission;
+      
+      if (!serviceEnabled || !hasPermission) {
+        if (mounted) {
+          setState(() {
+            _hasPermission = false;
+          });
+          
+          if (!serviceEnabled) {
+            _showLocationServiceDialog();
+          } else {
+            _showPermissionDialog();
+          }
+        }
+      } else if (!_hasPermission) {
+        if (mounted) {
+          setState(() {
+            _hasPermission = true;
+          });
+          // Try to get current location if we have permission now
+          await locationService.getCurrentPosition('default');
+          _updateLocationDisplay();
+        }
+      }
+    } catch (e) {
+      // Handle errors silently to prevent crashes
+      print('Error checking location status: $e');
+    }
+  }
+
+  Future<void> _initializeLocation() async {
+    if (!mounted) return;
+    
+    try {
+      final locationService = context.read<LocationService>();
+      
+      setState(() {
+        _isRequestingPermission = true;
+      });
+      
+      // Check if location services are enabled first
+      bool serviceEnabled = await locationService.isLocationServiceEnabled;
+      if (!serviceEnabled) {
+        if (mounted) {
+          setState(() {
+            _hasPermission = false;
+            _isRequestingPermission = false;
+          });
+          _showLocationServiceDialog();
+        }
+        return;
+      }
+      
+      // Request permission
+      bool hasPermission = await locationService.requestPermission();
+      
+      if (mounted) {
+        setState(() {
+          _hasPermission = hasPermission;
+          _isRequestingPermission = false;
+        });
+        
+        if (hasPermission) {
+          // Try to get current position
+          await locationService.getCurrentPosition('default');
+          _updateLocationDisplay();
+        } else {
+          _showPermissionDialog();
+        }
+      }
+    } catch (e) {
+      print('Error initializing location: $e');
+      if (mounted) {
+        setState(() {
+          _hasPermission = false;
+          _isRequestingPermission = false;
+        });
+        _showLocationServiceDialog();
+      }
+    }
+  }
+
+  void _showLocationServiceDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.location_disabled, color: Colors.red),
+              SizedBox(width: 8),
+              Text('Location Services Disabled'),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Location services are currently disabled on your device.',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 16),
+              Text(
+                'To use this app, please:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text('1. Go to your device Settings'),
+              Text('2. Find Location or Privacy & Security'),
+              Text('3. Turn on Location Services'),
+              Text('4. Return to this app'),
+              SizedBox(height: 16),
+              Text(
+                'Location services are required for:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              SizedBox(height: 8),
+              Text('• Tracking your current location'),
+              Text('• Displaying your position on the map'),
+              Text('• Monitoring your movement and speed'),
             ],
           ),
           actions: [
-            IconButton(
-              icon: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
-              onPressed: _toggleTracking,
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Go back to previous screen
+              },
+              child: const Text('Cancel'),
             ),
-          ],
-        ),
-        body: TabBarView(
-          controller: _tabController,
-          children: [
-            _buildMapView(),
-            _buildSensorView(),
-            _buildAnalyticsView(),
-          ],
-        ),
-        floatingActionButton: Column(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            FloatingActionButton(
-              heroTag: "center_location_tracking",
-              onPressed: _centerMapOnCurrentLocation,
-              child: const Icon(Icons.my_location),
-            ),
-            const SizedBox(height: 16),
-            FloatingActionButton(
-              heroTag: "select_vehicle_tracking",
-              onPressed: _showVehicleSelector,
-              child: const Icon(Icons.directions_car),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildMapView() {
-    return Consumer2<LocationService, FamilyVehicleService>(
-      builder: (context, locationService, vehicleService, child) {
-        return Stack(
-          children: [
-            // Custom map view instead of Google Maps
-            Container(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [Colors.blue[50]!, Colors.white],
-                ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await Geolocator.openLocationSettings();
+                // Wait a bit and then check again
+                Future.delayed(const Duration(seconds: 2), () {
+                  _initializeLocation();
+                });
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
               ),
-              child: Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(Icons.map, size: 80, color: Colors.blue[300]),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Map View',
-                      style: TextStyle(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue[800],
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Location tracking is active',
-                      style: TextStyle(
-                        fontSize: 16,
-                        color: Colors.blue[600],
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    ElevatedButton.icon(
-                      onPressed: () {
-                        _centerMapOnCurrentLocation();
-                      },
-                      icon: const Icon(Icons.my_location),
-                      label: const Text('Center Location'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              child: const Text('Open Settings'),
             ),
-            if (locationService.currentLocation != null)
-              Positioned(
-                top: 16,
-                left: 16,
-                right: 16,
-                child: Card(
-                  elevation: 4,
-                  child: Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Row(
-                          children: [
-                            Icon(Icons.location_on, color: Colors.blue[600], size: 20),
-                            const SizedBox(width: 8),
-                            Text(
-                              'Current Location',
-                              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            const Spacer(),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: locationService.isTracking ? Colors.green : Colors.orange,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    locationService.isTracking ? Icons.gps_fixed : Icons.gps_off,
-                                    color: Colors.white,
-                                    size: 12,
-                                  ),
-                                  const SizedBox(width: 4),
-                                  Text(
-                                    locationService.isTracking ? 'Tracking' : 'Static',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Lat: ${locationService.currentLocation!.latitude.toStringAsFixed(6)}',
-                          style: const TextStyle(fontSize: 14, color: Colors.grey),
-                        ),
-                        Text(
-                          'Lng: ${locationService.currentLocation!.longitude.toStringAsFixed(6)}',
-                          style: const TextStyle(fontSize: 14, color: Colors.grey),
-                        ),
-                        Text(
-                          'Speed: ${locationService.currentLocation!.speed.toStringAsFixed(1)} km/h',
-                          style: const TextStyle(fontSize: 14, color: Colors.grey),
-                        ),
-                        if (locationService.currentLocation!.address != null) ...[
-                          const SizedBox(height: 8),
-                          Text(
-                            'Address: ${locationService.currentLocation!.address}',
-                            style: const TextStyle(fontSize: 12, color: Colors.grey),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ],
-                        const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            Text(
-                              'Updated: ${_formatTime(locationService.currentLocation!.timestamp)}',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
-                            ),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  onPressed: () {
-                                    _initializeLocation();
-                                    _updateMapWithCurrentLocation();
-                                  },
-                                  icon: const Icon(Icons.refresh, size: 16),
-                                  tooltip: 'Refresh Location',
-                                ),
-                                IconButton(
-                                  onPressed: _showLocationInputDialog,
-                                  icon: const Icon(Icons.edit_location, size: 16),
-                                  tooltip: 'Set Custom Location',
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
           ],
         );
       },
     );
   }
 
-  Widget _buildSensorView() {
-    return Consumer<SensorService>(
-      builder: (context, sensorService, child) {
-        if (sensorService.currentSensorData == null) {
-          return const Center(
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.sensors_off, size: 64, color: Colors.grey),
-                SizedBox(height: 16),
-                Text(
-                  'No sensor data available',
-                  style: TextStyle(fontSize: 18, color: Colors.grey),
-                ),
-                SizedBox(height: 8),
-                Text(
-                  'Start tracking to see sensor data',
-                  style: TextStyle(fontSize: 14, color: Colors.grey),
-                ),
-              ],
-            ),
-          );
-        }
-
-        final sensorData = sensorService.currentSensorData!;
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Row(
+            children: [
+              Icon(Icons.location_off, color: Colors.orange),
+              SizedBox(width: 8),
+              Text('Location Permission Required'),
+            ],
+          ),
+          content: const Column(
+            mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.health_and_safety,
-                            color: _getHealthStatusColor(sensorData.healthStatus),
-                            size: 24,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            'Health Status',
-                            style: Theme.of(context).textTheme.titleLarge,
-                          ),
-                          const Spacer(),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: _getHealthStatusColor(sensorData.healthStatus),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  _getHealthStatusIcon(sensorData.healthStatus),
-                                  color: Colors.white,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 4),
-                                Text(
-                                  sensorData.healthStatus,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Last Updated: ${_formatTime(sensorData.timestamp)}',
-                        style: const TextStyle(color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ),
+              Text(
+                'This app needs location permission to:',
+                style: TextStyle(fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 16),
-              GridView.count(
-                crossAxisCount: 2,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                childAspectRatio: 1.5,
-                children: [
-                  _buildSensorCard(
-                    'Engine Temperature',
-                    '${sensorData.engineTemperature.toStringAsFixed(1)}°C',
-                    Icons.thermostat,
-                    _getTemperatureColor(sensorData.engineTemperature),
-                  ),
-                  _buildSensorCard(
-                    'Fuel Level',
-                    '${sensorData.fuelLevel.toStringAsFixed(1)}%',
-                    Icons.local_gas_station,
-                    _getFuelColor(sensorData.fuelLevel),
-                  ),
-                  _buildSensorCard(
-                    'Battery Voltage',
-                    '${sensorData.batteryVoltage.toStringAsFixed(1)}V',
-                    Icons.battery_std,
-                    _getBatteryColor(sensorData.batteryVoltage),
-                  ),
-                  _buildSensorCard(
-                    'Tire Pressure',
-                    '${sensorData.tirePressure.toStringAsFixed(1)} PSI',
-                    Icons.tire_repair,
-                    _getTireColor(sensorData.tirePressure),
-                  ),
-                  _buildSensorCard(
-                    'Brake Pad Wear',
-                    '${sensorData.brakePadWear.toStringAsFixed(1)}%',
-                    Icons.directions_car,
-                    _getBrakeColor(sensorData.brakePadWear),
-                  ),
-                  _buildSensorCard(
-                    'Engine Oil Level',
-                    '${sensorData.engineOilLevel.toStringAsFixed(1)}%',
-                    Icons.oil_barrel,
-                    _getOilColor(sensorData.engineOilLevel),
-                  ),
-                ],
+              SizedBox(height: 8),
+              Text('• Track your current location'),
+              Text('• Display your position on the map'),
+              Text('• Monitor your movement and speed'),
+              SizedBox(height: 16),
+              Text(
+                'Please grant location permission in your device settings to continue.',
+                style: TextStyle(fontStyle: FontStyle.italic),
               ),
             ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Go back to previous screen
+              },
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () async {
+                Navigator.of(context).pop();
+                await _requestPermissionAgain();
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Theme.of(context).primaryColor,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Grant Permission'),
+            ),
+          ],
         );
       },
     );
   }
 
-  Widget _buildSensorCard(String title, String value, IconData icon, Color color) {
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: 32, color: color),
-            const SizedBox(height: 8),
-            Text(
-              value,
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: color,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              title,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildAnalyticsView() {
-    return Consumer2<LocationService, SensorService>(
-      builder: (context, locationService, sensorService, child) {
-        return SingleChildScrollView(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _buildStatistics(locationService, sensorService),
-              const SizedBox(height: 24),
-              _buildSpeedChart(locationService),
-              const SizedBox(height: 24),
-              _buildSensorChart(sensorService),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildStatistics(LocationService locationService, SensorService sensorService) {
-    final avgSpeed = locationService.locationHistory.isNotEmpty
-        ? locationService.locationHistory.map((l) => l.speed).reduce((a, b) => a + b) / locationService.locationHistory.length
-        : 0.0;
-
-    return Column(
-      children: [
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('Avg Speed', '${avgSpeed.toStringAsFixed(1)} km/h', Icons.speed),
-            _buildStatItem('Total Distance', '${_calculateTotalDistance(locationService.locationHistory).toStringAsFixed(1)} km', Icons.route),
-          ],
-        ),
-        const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceAround,
-          children: [
-            _buildStatItem('Data Points', '${locationService.locationHistory.length}', Icons.data_usage),
-            _buildStatItem('Health Status', sensorService.currentSensorData?.healthStatus ?? 'Unknown', Icons.health_and_safety),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildStatItem(String label, String value, IconData icon) {
-    return Column(
-      children: [
-        Icon(icon, size: 32, color: const Color(0xFF667eea)),
-        const SizedBox(height: 8),
-        Text(
-          value,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        Text(
-          label,
-          style: const TextStyle(fontSize: 12, color: Colors.grey),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSpeedChart(LocationService locationService) {
-    if (locationService.locationHistory.length < 2) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(
-            child: Text('Not enough data for speed chart'),
-          ),
-        ),
-      );
-    }
-
-    final speedData = locationService.locationHistory
-        .map((location) => location.speed)
-        .toList();
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Speed Trend',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 200,
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(show: true),
-                  titlesData: const FlTitlesData(show: true),
-                  borderData: FlBorderData(show: true),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: speedData.asMap().entries
-                          .map((e) => FlSpot(e.key.toDouble(), e.value))
-                          .toList(),
-                      isCurved: true,
-                      color: const Color(0xFF667eea),
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildSensorChart(SensorService sensorService) {
-    if (sensorService.sensorHistory.isEmpty) {
-      return const Card(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(
-            child: Text('No sensor data available'),
-          ),
-        ),
-      );
-    }
-
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Sensor Data',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              height: 200,
-              child: LineChart(
-                LineChartData(
-                  gridData: const FlGridData(show: true),
-                  titlesData: const FlTitlesData(show: true),
-                  borderData: FlBorderData(show: true),
-                  lineBarsData: [
-                    LineChartBarData(
-                      spots: sensorService.sensorHistory
-                          .asMap()
-                          .entries
-                          .map((e) => FlSpot(e.key.toDouble(), e.value.engineTemperature))
-                          .toList(),
-                      isCurved: true,
-                      color: Colors.red,
-                      barWidth: 3,
-                      dotData: const FlDotData(show: false),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _toggleTracking() {
-    if (_selectedVehicle == null) {
-      _showVehicleSelector();
+  Future<void> _requestPermissionAgain() async {
+    setState(() {
+      _isRequestingPermission = true;
+    });
+    
+    final locationService = context.read<LocationService>();
+    
+    // First check if location services are enabled
+    bool serviceEnabled = await locationService.isLocationServiceEnabled;
+    if (!serviceEnabled) {
+      setState(() {
+        _hasPermission = false;
+        _isRequestingPermission = false;
+      });
+      if (mounted) {
+        _showLocationServiceDialog();
+      }
       return;
     }
-
+    
+    bool hasPermission = await locationService.requestPermission();
+    
     setState(() {
-      _isTracking = !_isTracking;
+      _hasPermission = hasPermission;
+      _isRequestingPermission = false;
     });
-
-    if (_isTracking) {
-      context.read<LocationService>().startTracking(_selectedVehicle!.id);
-      context.read<SensorService>().startMonitoring(_selectedVehicle!.id);
-      
-      // Update map with tracking data
-      _updateMapWithCurrentLocation();
-      
-      // Show success message
+    
+    if (hasPermission) {
+      await locationService.getCurrentPosition('default');
+      _updateLocationDisplay();
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Tracking started'),
+          content: Text('Location permission granted!'),
           backgroundColor: Colors.green,
         ),
       );
     } else {
-      context.read<LocationService>().stopTracking();
-      context.read<SensorService>().stopMonitoring();
-      
-      // Clear vehicle markers when stopping
-      _markers.removeWhere((marker) => marker.markerId.value.startsWith('vehicle_'));
-      setState(() {});
-      
-      // Show success message
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Tracking stopped'),
-          backgroundColor: Colors.orange,
+        SnackBar(
+          content: Text(locationService.error ?? 'Permission denied'),
+          backgroundColor: Colors.red,
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: () async {
+                await Geolocator.openAppSettings();
+              },
+            ),
         ),
       );
     }
   }
 
-  void _centerMapOnCurrentLocation() {
-    // Center map on current location
-    _updateMapWithCurrentLocation();
+  void _updateLocationDisplay() {
+    // This method is called when location is updated
+    // The UI will automatically rebuild through the Consumer widget
+    setState(() {});
   }
 
-  void _showVehicleSelector() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Vehicle'),
-        content: Consumer<FamilyVehicleService>(
-          builder: (context, vehicleService, child) {
-            return SizedBox(
-              width: double.maxFinite,
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: vehicleService.vehicles.length,
-                itemBuilder: (context, index) {
-                  final vehicle = vehicleService.vehicles[index];
-                  return ListTile(
-                    title: Text(vehicle.name),
-                    subtitle: Text('${vehicle.fullName} - ${vehicle.status}'),
-                    onTap: () {
-                      setState(() {
-                        _selectedVehicle = vehicle;
-                      });
-                      Navigator.pop(context);
-                      _updateMapWithCurrentLocation();
-                    },
-                  );
-                },
+  Widget _buildLocationDisplay(LocationService locationService) {
+    final location = locationService.currentLocation!;
+    
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Location Status Card
+          Card(
+            elevation: 4,
+            color: location.accuracy < 10 ? Colors.green.shade50 : Colors.orange.shade50,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(
+                    location.accuracy < 10 ? Icons.location_on : Icons.location_searching,
+                    color: location.accuracy < 10 ? Colors.green : Colors.orange,
+                    size: 24,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          location.accuracy < 10 ? 'High Accuracy' : 'Low Accuracy',
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            color: location.accuracy < 10 ? Colors.green : Colors.orange,
+                          ),
+                        ),
+                        Text(
+                          'Accuracy: ${location.accuracy.toStringAsFixed(1)} meters',
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          // Current Location Card
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.my_location,
+                        color: Theme.of(context).primaryColor,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'Current Location',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildLocationInfoRow('Latitude', location.latitude.toStringAsFixed(6)),
+                  _buildLocationInfoRow('Longitude', location.longitude.toStringAsFixed(6)),
+                  _buildLocationInfoRow('Speed', '${location.speed.toStringAsFixed(1)} km/h'),
+                  _buildLocationInfoRow('Accuracy', '${location.accuracy.toStringAsFixed(1)} meters'),
+                  _buildLocationInfoRow('Heading', '${location.heading.toStringAsFixed(1)}°'),
+                  if (location.address != null) ...[
+                    const SizedBox(height: 8),
+                    _buildLocationInfoRow('Address', location.address!),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Tracking Status Card
+          Card(
+            elevation: 4,
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Icon(
+                        _isTracking ? Icons.play_circle : Icons.pause_circle,
+                        color: _isTracking ? Colors.green : Colors.orange,
+                        size: 24,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Tracking Status',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  _buildStatusRow('Status', _isTracking ? 'Active' : 'Inactive', 
+                    _isTracking ? Colors.green : Colors.orange),
+                  _buildStatusRow('Points Recorded', '${_trackingPoints.length}', Colors.blue),
+                  _buildStatusRow('Last Update', _formatTime(location.timestamp), Colors.grey),
+                ],
+              ),
+            ),
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Location History Card
+          if (_trackingPoints.isNotEmpty)
+            Card(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.timeline,
+                          color: Theme.of(context).primaryColor,
+                          size: 24,
+                        ),
+                        const SizedBox(width: 8),
+                        const Text(
+                          'Location History',
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Container(
+                      height: 200,
+                      child: ListView.builder(
+                        itemCount: _trackingPoints.length,
+                        itemBuilder: (context, index) {
+                          final point = _trackingPoints[index];
+                          return ListTile(
+                            leading: CircleAvatar(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              child: Text('${index + 1}'),
+                            ),
+                            title: Text('Point ${index + 1}'),
+                            subtitle: Text(
+                              'Lat: ${point['latitude']!.toStringAsFixed(4)}\nLng: ${point['longitude']!.toStringAsFixed(4)}',
+                            ),
+                            isThreeLine: true,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+        ],
               ),
             );
-          },
-        ),
+          }
+
+  Widget _buildLocationInfoRow(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 80,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusRow(String label, String value, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 120,
+            child: Text(
+              '$label:',
+              style: const TextStyle(
+                fontWeight: FontWeight.w500,
+                color: Colors.grey,
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withOpacity(0.3)),
+            ),
+            child: Text(
+              value,
+              style: TextStyle(
+                fontWeight: FontWeight.w500,
+                color: color,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
   String _formatTime(DateTime timestamp) {
-    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}:${timestamp.second.toString().padLeft(2, '0')}';
   }
 
-  Color _getHealthStatusColor(String status) {
-    switch (status) {
-      case 'Good':
-        return Colors.green;
-      case 'Warning':
-        return Colors.orange;
-      case 'Critical':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  IconData _getHealthStatusIcon(String status) {
-    switch (status) {
-      case 'Good':
-        return Icons.check_circle;
-      case 'Warning':
-        return Icons.warning;
-      case 'Critical':
-        return Icons.error;
-      default:
-        return Icons.help;
-    }
-  }
-
-  Color _getTemperatureColor(double temp) {
-    if (temp > 100) return Colors.red;
-    if (temp > 90) return Colors.orange;
-    return Colors.green;
-  }
-
-  Color _getFuelColor(double fuel) {
-    if (fuel < 20) return Colors.red;
-    if (fuel < 50) return Colors.orange;
-    return Colors.green;
-  }
-
-  Color _getBatteryColor(double voltage) {
-    if (voltage < 12.0) return Colors.red;
-    if (voltage < 12.5) return Colors.orange;
-    return Colors.green;
-  }
-
-  Color _getTireColor(double pressure) {
-    if (pressure < 30) return Colors.red;
-    if (pressure < 35) return Colors.orange;
-    return Colors.green;
-  }
-
-  Color _getBrakeColor(double wear) {
-    if (wear > 80) return Colors.red;
-    if (wear > 60) return Colors.orange;
-    return Colors.green;
-  }
-
-  Color _getOilColor(double level) {
-    if (level < 20) return Colors.red;
-    if (level < 50) return Colors.orange;
-    return Colors.green;
-  }
-
-  double _calculateTotalDistance(List<LocationData> locations) {
-    if (locations.length < 2) return 0.0;
+  void _toggleTracking() {
+    if (!mounted) return;
     
-    double totalDistance = 0.0;
-    for (int i = 1; i < locations.length; i++) {
-      final prev = locations[i - 1];
-      final curr = locations[i];
-      totalDistance += _calculateDistance(prev.latitude, prev.longitude, curr.latitude, curr.longitude);
+    try {
+      final locationService = context.read<LocationService>();
+      
+      setState(() {
+        _isTracking = !_isTracking;
+        if (!_isTracking) {
+          _trackingPoints.clear();
+          locationService.stopTracking();
+        } else {
+          // Start tracking with the location service
+          locationService.startTracking('default');
+          // Add current location as first tracking point
+          if (locationService.currentLocation != null) {
+            _trackingPoints.add({
+              'latitude': locationService.currentLocation!.latitude,
+              'longitude': locationService.currentLocation!.longitude,
+            });
+          }
+        }
+      });
+    } catch (e) {
+      print('Error toggling tracking: $e');
+      // Reset state on error
+      if (mounted) {
+        setState(() {
+          _isTracking = false;
+        });
+      }
     }
-    return totalDistance;
   }
 
-  double _calculateDistance(double lat1, double lon1, double lat2, double lon2) {
-    const double earthRadius = 6371; // Earth's radius in kilometers
-    final double dLat = _degreesToRadians(lat2 - lat1);
-    final double dLon = _degreesToRadians(lon2 - lon1);
-    final double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
-        math.cos(_degreesToRadians(lat1)) * math.cos(_degreesToRadians(lat2)) *
-        math.sin(dLon / 2) * math.sin(dLon / 2);
-    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
-    return earthRadius * c;
+  void _clearTracking() {
+    setState(() {
+      _trackingPoints.clear();
+    });
   }
 
-  double _degreesToRadians(double degrees) {
-    return degrees * (math.pi / 180);
+  Future<void> _refreshLocation() async {
+    setState(() {
+      _isRequestingPermission = true;
+    });
+    
+    final locationService = context.read<LocationService>();
+    
+    // Check location service status first
+    bool serviceEnabled = await locationService.isLocationServiceEnabled;
+    if (!serviceEnabled) {
+      setState(() {
+        _hasPermission = false;
+        _isRequestingPermission = false;
+      });
+      if (mounted) {
+        _showLocationServiceDialog();
+      }
+      return;
+    }
+    
+    // Check permission
+    bool hasPermission = await locationService.hasPermission;
+    if (!hasPermission) {
+      setState(() {
+        _hasPermission = false;
+        _isRequestingPermission = false;
+      });
+      if (mounted) {
+        _showPermissionDialog();
+      }
+      return;
+    }
+    
+    // Try to get current location
+    try {
+      await locationService.getCurrentPosition('default');
+      _updateLocationDisplay();
+      
+      setState(() {
+        _hasPermission = true;
+        _isRequestingPermission = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location refreshed successfully!'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      setState(() {
+        _isRequestingPermission = false;
+      });
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to get location: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
   }
 
-  void _showLocationInputDialog() {
-    final latitudeController = TextEditingController();
-    final longitudeController = TextEditingController();
-    final addressController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Set Your Location'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text('Enter your current location coordinates:'),
-              const SizedBox(height: 16),
-              TextField(
-                controller: latitudeController,
-                decoration: const InputDecoration(
-                  labelText: 'Latitude',
-                  hintText: 'e.g., 6.9271',
-                  border: OutlineInputBorder(),
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Location Tracking'),
+        centerTitle: true,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _refreshLocation,
+            tooltip: 'Refresh Location',
+          ),
+          if (!_hasPermission)
+            IconButton(
+              icon: const Icon(Icons.location_on),
+              onPressed: _requestPermissionAgain,
+              tooltip: 'Grant Location Permission',
+            ),
+          IconButton(
+            icon: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
+            onPressed: _hasPermission ? _toggleTracking : null,
+            tooltip: _isTracking ? 'Stop Tracking' : 'Start Tracking',
+          ),
+          IconButton(
+            icon: const Icon(Icons.clear),
+            onPressed: _hasPermission ? _clearTracking : null,
+            tooltip: 'Clear Path',
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Status Bar
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Theme.of(context).primaryColor.withOpacity(0.1),
+            child: Row(
+              children: [
+                Consumer2<LocationService, SensorService>(
+                  builder: (context, locationService, sensorService, child) {
+                    return Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Icon(
+                                _hasPermission ? Icons.location_on : Icons.location_off,
+                                size: 16,
+                                color: _hasPermission ? Colors.green : Colors.red,
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Status: ${_hasPermission ? "Ready" : "Not Ready"}',
+                                style: TextStyle(
+                                  color: _hasPermission ? Colors.green : Colors.red,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Location: ${locationService.isTracking ? "Active" : "Inactive"}',
+                            style: TextStyle(
+                              color: locationService.isTracking ? Colors.green : Colors.red,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                          Text(
+                            'Speed: ${sensorService.currentSpeed.toStringAsFixed(1)} km/h',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
                 ),
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: longitudeController,
-                decoration: const InputDecoration(
-                  labelText: 'Longitude',
-                  hintText: 'e.g., 79.8612',
-                  border: OutlineInputBorder(),
-                ),
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: addressController,
-                decoration: const InputDecoration(
-                  labelText: 'Address (Optional)',
-                  hintText: 'e.g., Your City, Country',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        // Get current location from device
-                        _initializeLocation();
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.my_location),
-                      label: const Text('Use GPS'),
+                Column(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _isTracking ? Colors.red : Colors.green,
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text(
+                        _isTracking ? 'TRACKING' : 'STOPPED',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () {
-                        // Use common locations
-                        _showCommonLocationsDialog();
-                        Navigator.pop(context);
-                      },
-                      icon: const Icon(Icons.location_city),
-                      label: const Text('Common'),
+                    if (!_hasPermission) ...[
+                      const SizedBox(height: 4),
+                      ElevatedButton(
+                        onPressed: _requestPermissionAgain,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        ),
+                        child: const Text(
+                          'Grant Permission',
+                          style: TextStyle(fontSize: 10),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+          
+          // Location Display
+          Expanded(
+            child: Consumer<LocationService>(
+              builder: (context, locationService, child) {
+                // Show loading state while requesting permission
+                if (_isRequestingPermission) {
+                  return const Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Requesting location permission...'),
+                      ],
                     ),
+                  );
+                }
+                
+                // Show permission denied state
+                if (!_hasPermission) {
+                  return Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(
+                            Icons.location_disabled,
+                            size: 80,
+                            color: Colors.red.withOpacity(0.7),
+                          ),
+                          const SizedBox(height: 24),
+                          const Text(
+                            'Location Permission Required',
+                            style: TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'This app needs location permission to track your position.',
+                            style: TextStyle(fontSize: 16),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 32),
+                          ElevatedButton.icon(
+                            onPressed: _requestPermissionAgain,
+                            icon: const Icon(Icons.location_on),
+                            label: const Text('Grant Permission'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Theme.of(context).primaryColor,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                                vertical: 16,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                            children: [
+                              TextButton(
+                                onPressed: () {
+                                  Navigator.of(context).pop();
+                                },
+                                child: const Text('Go Back'),
+                              ),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  Navigator.of(context).pop();
+                                  await Geolocator.openLocationSettings();
+                                },
+                                icon: const Icon(Icons.settings),
+                                label: const Text('Open Settings'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.blue,
+                                  foregroundColor: Colors.white,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }
+                
+                // Show no location data state
+                if (locationService.currentLocation == null) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.location_searching,
+                          size: 64,
+                          color: Colors.orange.withOpacity(0.7),
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'Getting your location...',
+                          style: TextStyle(fontSize: 18),
+                        ),
+                        const SizedBox(height: 8),
+                        const Text('Please wait while we find your position'),
+                        const SizedBox(height: 24),
+                        ElevatedButton.icon(
+                          onPressed: () async {
+                            final locationService = context.read<LocationService>();
+                            await locationService.getCurrentPosition('default');
+                            _updateLocationDisplay();
+                          },
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Refresh Location'),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                // Show location information
+                return _buildLocationDisplay(locationService);
+              },
+            ),
+          ),
+          
+          // Bottom Info Panel
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Theme.of(context).cardColor,
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 4,
+                  offset: const Offset(0, -2),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Consumer2<LocationService, SensorService>(
+                  builder: (context, locationService, sensorService, child) {
+                    final location = locationService.currentLocation;
+                    if (location == null) {
+                      return const Text('No location data');
+                    }
+
+                    return Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildInfoItem('Latitude', location.latitude.toStringAsFixed(6)),
+                            _buildInfoItem('Longitude', location.longitude.toStringAsFixed(6)),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildInfoItem('Speed', '${location.speed.toStringAsFixed(1)} km/h'),
+                            _buildInfoItem('Accuracy', '${location.accuracy.toStringAsFixed(1)} m'),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceAround,
+                          children: [
+                            _buildInfoItem('Device Speed', '${sensorService.currentSpeed.toStringAsFixed(1)} km/h'),
+                            _buildInfoItem('Moving', sensorService.isMoving ? 'Yes' : 'No'),
+                          ],
+                        ),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _hasPermission ? _toggleTracking : null,
+                        icon: Icon(_isTracking ? Icons.stop : Icons.play_arrow),
+                        label: Text(_isTracking ? 'Stop Tracking' : 'Start Tracking'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _isTracking ? Colors.red : Colors.green,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        onPressed: _hasPermission ? _clearTracking : null,
+                        icon: const Icon(Icons.clear),
+                        label: const Text('Clear Path'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                if (!_hasPermission) ...[
+                  const SizedBox(height: 8),
+                  const Text(
+                    'Location permission required to start tracking',
+                    style: TextStyle(
+                      color: Colors.red,
+                      fontSize: 12,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
                 ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              final lat = double.tryParse(latitudeController.text);
-              final lng = double.tryParse(longitudeController.text);
-              
-              if (lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180) {
-                final customLocation = LocationData(
-                  id: DateTime.now().millisecondsSinceEpoch.toString(),
-                  busId: 'custom',
-                  latitude: lat,
-                  longitude: lng,
-                  speed: 0.0,
-                  heading: 0.0,
-                  accuracy: 5.0,
-                  timestamp: DateTime.now(),
-                  address: addressController.text.isNotEmpty ? addressController.text : null,
-                );
-                
-                final locationService = context.read<LocationService>();
-                locationService.setMockLocation(customLocation);
-                _updateMapWithCurrentLocation();
-                
-                Navigator.pop(context);
-                
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Custom location set successfully'),
-                    backgroundColor: Colors.green,
-                  ),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter valid coordinates'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Set Location'),
+              ],
+            ),
           ),
         ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _refreshLocation,
+        tooltip: 'Refresh Location',
+        child: const Icon(Icons.my_location),
       ),
     );
   }
 
-  void _showCommonLocationsDialog() {
-    final commonLocations = [
-      {'name': 'Colombo, Sri Lanka', 'lat': 6.9271, 'lng': 79.8612},
-      {'name': 'New York, USA', 'lat': 40.7128, 'lng': -74.0060},
-      {'name': 'London, UK', 'lat': 51.5074, 'lng': -0.1278},
-      {'name': 'Tokyo, Japan', 'lat': 35.6762, 'lng': 139.6503},
-      {'name': 'Sydney, Australia', 'lat': -33.8688, 'lng': 151.2093},
-      {'name': 'Dubai, UAE', 'lat': 25.2048, 'lng': 55.2708},
-    ];
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Select Common Location'),
-        content: SizedBox(
-          width: double.maxFinite,
-          child: ListView.builder(
-            shrinkWrap: true,
-            itemCount: commonLocations.length,
-            itemBuilder: (context, index) {
-              final location = commonLocations[index];
-              return ListTile(
-                title: Text(location['name'] as String),
-                subtitle: Text('${location['lat']}, ${location['lng']}'),
-                onTap: () {
-                  final customLocation = LocationData(
-                    id: DateTime.now().millisecondsSinceEpoch.toString(),
-                    busId: 'common',
-                    latitude: location['lat'] as double,
-                    longitude: location['lng'] as double,
-                    speed: 0.0,
-                    heading: 0.0,
-                    accuracy: 5.0,
-                    timestamp: DateTime.now(),
-                    address: location['name'] as String,
-                  );
-                  
-                  final locationService = context.read<LocationService>();
-                  locationService.setMockLocation(customLocation);
-                  _updateMapWithCurrentLocation();
-                  
-                  Navigator.pop(context);
-                  
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Location set to ${location['name']}'),
-                      backgroundColor: Colors.green,
-                    ),
-                  );
-                },
-              );
-            },
+  Widget _buildInfoItem(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Colors.grey,
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
-
-}
-
-class _BackgroundPatternPainter extends CustomPainter {
-  @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..color = Colors.blue.withOpacity(0.05)
-      ..strokeWidth = 1.0
-      ..style = PaintingStyle.stroke;
-
-    // Draw grid pattern
-    const double spacing = 50.0;
-    for (double x = 0; x < size.width; x += spacing) {
-      canvas.drawLine(
-        Offset(x, 0),
-        Offset(x, size.height),
-        paint,
-      );
-    }
-    for (double y = 0; y < size.height; y += spacing) {
-      canvas.drawLine(
-        Offset(0, y),
-        Offset(size.width, y),
-        paint,
-      );
-    }
-
-    // Draw some decorative circles
-    final circlePaint = Paint()
-      ..color = Colors.blue.withOpacity(0.1)
-      ..style = PaintingStyle.fill;
-
-    canvas.drawCircle(Offset(size.width * 0.2, size.height * 0.3), 30, circlePaint);
-    canvas.drawCircle(Offset(size.width * 0.8, size.height * 0.7), 20, circlePaint);
-    canvas.drawCircle(Offset(size.width * 0.6, size.height * 0.2), 15, circlePaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

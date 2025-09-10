@@ -8,7 +8,7 @@ plugins {
 
 android {
     namespace = "com.example.driver_management"
-    compileSdk = 34
+    compileSdk = 35
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11

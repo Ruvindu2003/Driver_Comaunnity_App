@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
+import 'package:sensors_plus/sensors_plus.dart';
 import '../models/sensor_data.dart';
 
 class SensorService extends ChangeNotifier {
@@ -10,11 +11,33 @@ class SensorService extends ChangeNotifier {
   SensorData? _currentSensorData;
   bool _isMonitoring = false;
   String? _error;
+  
+  // Real sensor data streams
+  StreamSubscription<AccelerometerEvent>? _accelerometerSubscription;
+  StreamSubscription<GyroscopeEvent>? _gyroscopeSubscription;
+  StreamSubscription<MagnetometerEvent>? _magnetometerSubscription;
+  
+  // Current sensor readings
+  double _accelerationX = 0.0;
+  double _accelerationY = 0.0;
+  double _accelerationZ = 0.0;
+  double _gyroscopeX = 0.0;
+  double _gyroscopeY = 0.0;
+  double _gyroscopeZ = 0.0;
+  double _magnetometerX = 0.0;
+  double _magnetometerY = 0.0;
+  double _magnetometerZ = 0.0;
+  
+  // Speed calculation
+  double _currentSpeed = 0.0;
+  List<double> _speedHistory = [];
+  DateTime? _lastSpeedUpdate;
 
   List<SensorData> get sensorHistory => List.unmodifiable(_sensorHistory);
   SensorData? get currentSensorData => _currentSensorData;
   bool get isMonitoring => _isMonitoring;
   String? get error => _error;
+  double get currentSpeed => _currentSpeed;
 
   // Start sensor monitoring
   void startMonitoring(String busId) {
@@ -24,21 +47,147 @@ class SensorService extends ChangeNotifier {
     _error = null;
     notifyListeners();
 
-    // Simulate sensor data every 5 seconds
-    _sensorTimer = Timer.periodic(const Duration(seconds: 5), (timer) {
-      _generateSensorData(busId);
-    });
+    try {
+      // Start real sensor streams
+      _startAccelerometerStream();
+      _startGyroscopeStream();
+      _startMagnetometerStream();
+      
+      // Generate sensor data every 2 seconds with real sensor readings
+      _sensorTimer = Timer.periodic(const Duration(seconds: 2), (timer) {
+        _generateSensorDataWithRealSensors(busId);
+      });
+    } catch (e) {
+      _error = 'Failed to start sensors: $e';
+      _isMonitoring = false;
+      notifyListeners();
+    }
   }
 
   // Stop sensor monitoring
   void stopMonitoring() {
     _sensorTimer?.cancel();
     _sensorTimer = null;
+    
+    // Stop all sensor streams
+    _accelerometerSubscription?.cancel();
+    _gyroscopeSubscription?.cancel();
+    _magnetometerSubscription?.cancel();
+    
+    _accelerometerSubscription = null;
+    _gyroscopeSubscription = null;
+    _magnetometerSubscription = null;
+    
     _isMonitoring = false;
     notifyListeners();
   }
 
-  // Generate realistic sensor data
+  // Start accelerometer stream
+  void _startAccelerometerStream() {
+    _accelerometerSubscription = accelerometerEvents.listen((AccelerometerEvent event) {
+      _accelerationX = event.x;
+      _accelerationY = event.y;
+      _accelerationZ = event.z;
+      _calculateSpeed();
+    });
+  }
+
+  // Start gyroscope stream
+  void _startGyroscopeStream() {
+    _gyroscopeSubscription = gyroscopeEvents.listen((GyroscopeEvent event) {
+      _gyroscopeX = event.x;
+      _gyroscopeY = event.y;
+      _gyroscopeZ = event.z;
+    });
+  }
+
+  // Start magnetometer stream
+  void _startMagnetometerStream() {
+    _magnetometerSubscription = magnetometerEvents.listen((MagnetometerEvent event) {
+      _magnetometerX = event.x;
+      _magnetometerY = event.y;
+      _magnetometerZ = event.z;
+    });
+  }
+
+  // Calculate speed from accelerometer data
+  void _calculateSpeed() {
+    final now = DateTime.now();
+    
+    // Calculate acceleration magnitude (excluding gravity)
+    final accelerationMagnitude = sqrt(
+      pow(_accelerationX, 2) + 
+      pow(_accelerationY, 2) + 
+      pow(_accelerationZ - 9.81, 2) // Subtract gravity
+    );
+    
+    // Simple speed calculation based on acceleration
+    if (_lastSpeedUpdate != null) {
+      final timeDelta = now.difference(_lastSpeedUpdate!).inMilliseconds / 1000.0;
+      if (timeDelta > 0) {
+        final speedChange = accelerationMagnitude * timeDelta;
+        _currentSpeed = (_currentSpeed + speedChange).clamp(0.0, 200.0); // Max 200 km/h
+        
+        // Add some deceleration to simulate friction
+        _currentSpeed *= 0.98;
+      }
+    }
+    
+    _lastSpeedUpdate = now;
+    _speedHistory.add(_currentSpeed);
+    
+    // Keep only last 100 speed readings
+    if (_speedHistory.length > 100) {
+      _speedHistory.removeAt(0);
+    }
+  }
+
+  // Generate sensor data with real sensor readings
+  void _generateSensorDataWithRealSensors(String busId) {
+    final random = Random();
+    final now = DateTime.now();
+
+    // Generate realistic sensor readings with some variation
+    final sensorData = SensorData(
+      id: now.millisecondsSinceEpoch.toString(),
+      busId: busId,
+      engineTemperature: 85 + random.nextDouble() * 15, // 85-100°C
+      fuelLevel: 20 + random.nextDouble() * 60, // 20-80%
+      batteryVoltage: 12.0 + random.nextDouble() * 2.0, // 12-14V
+      tirePressure: 30 + random.nextDouble() * 10, // 30-40 PSI
+      brakePadWear: 20 + random.nextDouble() * 40, // 20-60%
+      engineOilLevel: 30 + random.nextDouble() * 50, // 30-80%
+      coolantLevel: 40 + random.nextDouble() * 40, // 40-80%
+      doorOpen: random.nextBool() && random.nextDouble() < 0.1, // 10% chance
+      emergencyBrake: random.nextBool() && random.nextDouble() < 0.05, // 5% chance
+      seatbeltWarning: random.nextBool() && random.nextDouble() < 0.15, // 15% chance
+      airbagStatus: random.nextBool() && random.nextDouble() < 0.02, // 2% chance
+      timestamp: now,
+      // Real device sensor data
+      speed: _currentSpeed,
+      accelerationX: _accelerationX,
+      accelerationY: _accelerationY,
+      accelerationZ: _accelerationZ,
+      gyroscopeX: _gyroscopeX,
+      gyroscopeY: _gyroscopeY,
+      gyroscopeZ: _gyroscopeZ,
+      magnetometerX: _magnetometerX,
+      magnetometerY: _magnetometerY,
+      magnetometerZ: _magnetometerZ,
+    );
+
+    _currentSensorData = sensorData;
+    _sensorHistory.add(sensorData);
+
+    // Keep only last 1000 readings to prevent memory issues
+    if (_sensorHistory.length > 1000) {
+      _sensorHistory.removeAt(0);
+    }
+
+    notifyListeners();
+  }
+
+  // Generate realistic sensor data (legacy method for fallback)
   void _generateSensorData(String busId) {
     final random = Random();
     final now = DateTime.now();
@@ -222,6 +371,69 @@ class SensorService extends ChangeNotifier {
     _currentSensorData = malfunctionData;
     _sensorHistory.add(malfunctionData);
     notifyListeners();
+  }
+
+  // Get real-time acceleration data
+  Map<String, double> getAccelerationData() {
+    return {
+      'x': _accelerationX,
+      'y': _accelerationY,
+      'z': _accelerationZ,
+    };
+  }
+
+  // Get real-time gyroscope data
+  Map<String, double> getGyroscopeData() {
+    return {
+      'x': _gyroscopeX,
+      'y': _gyroscopeY,
+      'z': _gyroscopeZ,
+    };
+  }
+
+  // Get real-time magnetometer data
+  Map<String, double> getMagnetometerData() {
+    return {
+      'x': _magnetometerX,
+      'y': _magnetometerY,
+      'z': _magnetometerZ,
+    };
+  }
+
+  // Get speed history
+  List<double> getSpeedHistory() {
+    return List.unmodifiable(_speedHistory);
+  }
+
+  // Get average speed over time period
+  double getAverageSpeed(Duration timePeriod) {
+    final cutoffTime = DateTime.now().subtract(timePeriod);
+    final recentSpeeds = _speedHistory.where((speed) => 
+      _lastSpeedUpdate != null && 
+      _lastSpeedUpdate!.isAfter(cutoffTime)
+    ).toList();
+    
+    if (recentSpeeds.isEmpty) return 0.0;
+    return recentSpeeds.reduce((a, b) => a + b) / recentSpeeds.length;
+  }
+
+  // Check if device is moving (based on acceleration)
+  bool get isMoving {
+    final accelerationMagnitude = sqrt(
+      pow(_accelerationX, 2) + 
+      pow(_accelerationY, 2) + 
+      pow(_accelerationZ - 9.81, 2)
+    );
+    return accelerationMagnitude > 0.5; // Threshold for movement detection
+  }
+
+  // Get device orientation (simplified)
+  String get deviceOrientation {
+    if (_accelerationZ > 8) return 'Portrait';
+    if (_accelerationZ < -8) return 'Portrait Upside Down';
+    if (_accelerationX > 8) return 'Landscape Left';
+    if (_accelerationX < -8) return 'Landscape Right';
+    return 'Unknown';
   }
 
   @override

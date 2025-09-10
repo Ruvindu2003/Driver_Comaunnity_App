@@ -36,10 +36,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   provider: ^6.1.2
   
-  # Location and mapping
+  # Location services
   geolocator: ^10.1.0
   geocoding: ^2.1.1
-  google_maps_flutter: ^2.5.0
   
   # Sensors and hardware
   sensors_plus: ^4.0.2

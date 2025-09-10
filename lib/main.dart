@@ -7,6 +7,7 @@ import 'services/notification_service.dart';
 import 'services/database_service.dart';
 import 'services/automatic_speed_control_service.dart';
 import 'services/weather_service.dart';
+import 'services/theme_service.dart';
 import 'home_page.dart';
 
 Future<void> main() async {
@@ -19,31 +20,37 @@ Future<void> main() async {
   // Initialize weather service
   final weatherService = WeatherService();
   
+  // Initialize theme service
+  final themeService = ThemeService();
+  
   runApp(MyApp(
     notificationService: notificationService,
     weatherService: weatherService,
+    themeService: themeService,
   ));
 }
 
 class MyApp extends StatelessWidget {
   final NotificationService notificationService;
   final WeatherService weatherService;
+  final ThemeService themeService;
   
   const MyApp({
     super.key, 
     required this.notificationService,
     required this.weatherService,
+    required this.themeService,
   });
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => FamilyVehicleService()),
         ChangeNotifierProvider(create: (_) => LocationService()),
         ChangeNotifierProvider(create: (_) => SensorService()),
         ChangeNotifierProvider.value(value: notificationService),
         ChangeNotifierProvider.value(value: weatherService),
+        ChangeNotifierProvider.value(value: themeService),
         ChangeNotifierProvider(
           create: (context) => AutomaticSpeedControlService(
             locationService: context.read<LocationService>(),
@@ -52,14 +59,17 @@ class MyApp extends StatelessWidget {
         ),
         Provider(create: (_) => DatabaseService()),
       ],
-      child: MaterialApp(
-        title: 'Family Vehicle Manager',
-        debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-          colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF667eea)),
-          useMaterial3: true,
-        ),
-        home: const AuthWrapper(),
+      child: Consumer<ThemeService>(
+        builder: (context, themeService, child) {
+          return MaterialApp(
+            title: 'Sensor & Location Manager',
+            debugShowCheckedModeBanner: false,
+            theme: themeService.lightTheme,
+            darkTheme: themeService.darkTheme,
+            themeMode: themeService.isDarkMode ? ThemeMode.dark : ThemeMode.light,
+            home: const AuthWrapper(),
+          );
+        },
       ),
     );
   }

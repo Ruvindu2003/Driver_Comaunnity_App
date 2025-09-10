@@ -1,12 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'screens/dashboard_screen.dart';
-import 'screens/family_vehicles_screen.dart';
-import 'screens/maintenance_screen.dart';
-import 'screens/fuel_tracking_screen.dart';
-import 'screens/add_vehicle_screen.dart';
 import 'screens/tracking_screen.dart';
-import 'screens/reports_screen.dart';
+import 'screens/sensor_test_screen.dart';
 import 'screens/settings_screen.dart';
 import 'screens/speed_control_monitor_screen.dart';
 import 'screens/speed_control_settings_screen.dart';
@@ -25,9 +21,8 @@ class _HomePageState extends State<HomePage> {
 
   final List<Widget> _screens = [
     const DashboardScreen(),
-    const FamilyVehiclesScreen(),
     const TrackingScreen(),
-    const ReportsScreen(),
+    const SensorTestScreen(),
     const SettingsScreen(),
   ];
 
@@ -61,16 +56,12 @@ class _HomePageState extends State<HomePage> {
             label: 'Dashboard',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.directions_car),
-            label: 'Vehicles',
-          ),
-          BottomNavigationBarItem(
             icon: Icon(Icons.location_on),
-            label: 'Tracking',
+            label: 'Location',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.analytics),
-            label: 'Reports',
+            icon: Icon(Icons.sensors),
+            label: 'Sensors',
           ),
           BottomNavigationBarItem(
             icon: Icon(Icons.settings),
@@ -136,6 +127,20 @@ class _HomePageState extends State<HomePage> {
                           );
                         },
                       ),
+                    ),
+                  );
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.sensors),
+                title: const Text('Sensor Test'),
+                subtitle: const Text('Test real device sensors'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const SensorTestScreen(),
                     ),
                   );
                 },

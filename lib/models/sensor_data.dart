@@ -13,6 +13,18 @@ class SensorData {
   final bool seatbeltWarning;
   final bool airbagStatus;
   final DateTime timestamp;
+  
+  // Real device sensor data
+  final double? speed; // km/h from accelerometer calculation
+  final double? accelerationX; // m/s²
+  final double? accelerationY; // m/s²
+  final double? accelerationZ; // m/s²
+  final double? gyroscopeX; // rad/s
+  final double? gyroscopeY; // rad/s
+  final double? gyroscopeZ; // rad/s
+  final double? magnetometerX; // μT
+  final double? magnetometerY; // μT
+  final double? magnetometerZ; // μT
 
   SensorData({
     required this.id,
@@ -29,6 +41,16 @@ class SensorData {
     required this.seatbeltWarning,
     required this.airbagStatus,
     required this.timestamp,
+    this.speed,
+    this.accelerationX,
+    this.accelerationY,
+    this.accelerationZ,
+    this.gyroscopeX,
+    this.gyroscopeY,
+    this.gyroscopeZ,
+    this.magnetometerX,
+    this.magnetometerY,
+    this.magnetometerZ,
   });
 
   Map<String, dynamic> toJson() {
@@ -47,6 +69,16 @@ class SensorData {
       'seatbeltWarning': seatbeltWarning,
       'airbagStatus': airbagStatus,
       'timestamp': timestamp.toIso8601String(),
+      'speed': speed,
+      'accelerationX': accelerationX,
+      'accelerationY': accelerationY,
+      'accelerationZ': accelerationZ,
+      'gyroscopeX': gyroscopeX,
+      'gyroscopeY': gyroscopeY,
+      'gyroscopeZ': gyroscopeZ,
+      'magnetometerX': magnetometerX,
+      'magnetometerY': magnetometerY,
+      'magnetometerZ': magnetometerZ,
     };
   }
 
@@ -66,6 +98,16 @@ class SensorData {
       seatbeltWarning: json['seatbeltWarning'],
       airbagStatus: json['airbagStatus'],
       timestamp: DateTime.parse(json['timestamp']),
+      speed: json['speed']?.toDouble(),
+      accelerationX: json['accelerationX']?.toDouble(),
+      accelerationY: json['accelerationY']?.toDouble(),
+      accelerationZ: json['accelerationZ']?.toDouble(),
+      gyroscopeX: json['gyroscopeX']?.toDouble(),
+      gyroscopeY: json['gyroscopeY']?.toDouble(),
+      gyroscopeZ: json['gyroscopeZ']?.toDouble(),
+      magnetometerX: json['magnetometerX']?.toDouble(),
+      magnetometerY: json['magnetometerY']?.toDouble(),
+      magnetometerZ: json['magnetometerZ']?.toDouble(),
     );
   }
 

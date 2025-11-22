@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "345739627083",
+    "project_id": "vehical-mnagement-system",
+    "storage_bucket": "vehical-mnagement-system.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:345739627083:android:077e1c01deaf53615f5bce",
+        "android_client_info": {
+          "package_name": "com.example.driver_management"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "345739627083-1ts3dk0fp3494bj6in49vhai8tu0vl53.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.driver_management",
+            "certificate_hash": "fd204170c4f206f40fc3485817d7f85373b82f68"
+          }
+        },
+        {
+          "client_id": "345739627083-bg6lh9krgoi19l7dimr4arstagflmevq.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDYqkBFSJ7-TN_s7rwfdkAI2W84JdZspKo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "345739627083-bg6lh9krgoi19l7dimr4arstagflmevq.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
